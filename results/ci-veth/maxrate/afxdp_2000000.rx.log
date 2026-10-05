@@ -1,0 +1,1 @@
+READY afxdp iface=veth-rx queue=0 mode=native copy umem=4K busy_poll=0

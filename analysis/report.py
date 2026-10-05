@@ -56,6 +56,7 @@ class Run:
     rtt_sched_us: np.ndarray | None = None
     rtt_send_us: np.ndarray | None = None
     extra: dict = field(default_factory=dict)
+    rep: str = "1"
 
     @property
     def lost(self) -> int:
@@ -73,8 +74,9 @@ class Run:
 
 
 def load_runs(root: Path) -> list[Run]:
+    """Layout: ROOT/<config>/... or, with repetitions, ROOT/rep<N>/<config>/..."""
     runs = []
-    for tx_path in sorted(root.glob("*/*.tx.json")):
+    for tx_path in sorted(list(root.glob("*/*.tx.json")) + list(root.glob("rep*/*/*.tx.json"))):
         stem = tx_path.name[: -len(".tx.json")]
         path, _, rate = stem.rpartition("_")
         tx = json.loads(tx_path.read_text())
@@ -83,7 +85,8 @@ def load_runs(root: Path) -> list[Run]:
             rx = json.loads(rx_path.read_text()) if rx_path.exists() else {}
         except json.JSONDecodeError:
             rx = {}
-        r = Run(tx_path.parent.name, path, int(rate), tx, rx)
+        rep = tx_path.parent.parent.name if tx_path.parent.parent != root else "1"
+        r = Run(tx_path.parent.name, path, int(rate), tx, rx, rep=rep.removeprefix("rep"))
         smp = tx_path.with_name(stem + ".samples.bin")
         if smp.exists():
             s = load_samples(smp)
@@ -115,19 +118,79 @@ def path_key(p: str) -> int:
 # tables
 # ---------------------------------------------------------------------------
 
+def group_reps(runs: list[Run]) -> dict[tuple[str, str, int], list[Run]]:
+    g: dict[tuple[str, str, int], list[Run]] = {}
+    for r in runs:
+        if r.rtt_sched_us is not None and len(r.rtt_sched_us):
+            g.setdefault((r.config, r.path, r.rate), []).append(r)
+    return g
+
+
+def rep_stat(rs: list[Run], p: float, which: str = "sched") -> tuple[float, float, float]:
+    """(median, min, max) across repetitions of the per-run percentile p."""
+    vals = [pct(r.rtt_sched_us if which == "sched" else r.rtt_send_us, p) for r in rs]
+    return float(np.median(vals)), float(min(vals)), float(max(vals))
+
+
+def cell(st: tuple[float, float, float], n: int) -> str:
+    med, lo, hi = st
+    return fmt(med) if n == 1 else f"{fmt(med)} ({fmt(lo)}–{fmt(hi)})"
+
+
 def latency_table(runs: list[Run]) -> str:
-    rows = [r for r in runs if r.rtt_sched_us is not None]
-    if not rows:
+    g = group_reps(runs)
+    if not g:
         return ""
-    out = ["| config | path | rate (pps) | samples | p50 µs | p99 µs | p99.9 µs | max µs "
-           "| p99.9 from send µs | lost | checksum |",
+    out = ["| config | path | rate (pps) | reps | samples/rep | p50 µs | p99 µs | p99.9 µs "
+           "| max µs (worst rep) | lost (all reps) | checksum |",
            "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
-    for r in sorted(rows, key=lambda r: (r.config, r.rate, path_key(r.path))):
-        a = r.rtt_sched_us
+    for (c, p, rt), rs in sorted(g.items(), key=lambda kv: (kv[0][0], kv[0][2], path_key(kv[0][1]))):
+        n = len(rs)
+        ok = sum(r.checksum_ok for r in rs)
         out.append(
-            f"| {r.config} | {r.path} | {r.rate:,} | {len(a):,} | {fmt(pct(a, 50))} | {fmt(pct(a, 99))} "
-            f"| {fmt(pct(a, 99.9))} | {fmt(float(a.max()) if len(a) else float('nan'))} "
-            f"| {fmt(pct(r.rtt_send_us, 99.9))} | {r.lost:,} | {'ok' if r.checksum_ok else 'MISMATCH'} |")
+            f"| {c} | {p} | {rt:,} | {n} | {len(rs[0].rtt_sched_us):,} | {cell(rep_stat(rs, 50), n)} "
+            f"| {cell(rep_stat(rs, 99), n)} | {cell(rep_stat(rs, 99.9), n)} "
+            f"| {fmt(max(float(r.rtt_sched_us.max()) for r in rs))} | {sum(r.lost for r in rs):,} "
+            f"| {'ok' if ok == n else f'{n - ok}/{n} MISMATCH'} |")
+    return "\n".join(out)
+
+
+def tuning_table(runs: list[Run], baseline: str) -> str:
+    """Each config vs `baseline`, per (path, rate). With repetitions, a change
+    is only called real when its min-max range across reps does not overlap the
+    baseline's range."""
+    g = group_reps(runs)
+    configs = sorted({c for c, _, _ in g})
+    if baseline not in configs or len(configs) < 2:
+        return ""
+    out = [f"| path | rate | config | reps | p50 µs | p99 µs | p99.9 µs | Δ median p99.9 vs `{baseline}` | verdict |",
+           "|---|---:|---|---:|---:|---:|---:|---:|---|"]
+    keys = sorted({(p, rt) for _, p, rt in g}, key=lambda k: (path_key(k[0]), k[1]))
+    for p, rt in keys:
+        base = g.get((baseline, p, rt))
+        if not base:
+            continue
+        b = rep_stat(base, 99.9)
+        for c in [baseline] + [c for c in configs if c != baseline]:
+            rs = g.get((c, p, rt))
+            if not rs:
+                continue
+            n = len(rs)
+            v = rep_stat(rs, 99.9)
+            if c == baseline:
+                d, verdict = "–", "reference"
+            else:
+                d = f"{100 * (v[0] - b[0]) / b[0]:+.0f}%"
+                if n < 2 or len(base) < 2:
+                    verdict = "single run"
+                elif v[1] > b[2]:
+                    verdict = "worse (ranges disjoint)"
+                elif v[2] < b[1]:
+                    verdict = "better (ranges disjoint)"
+                else:
+                    verdict = "within noise"
+            out.append(f"| {p} | {rt:,} | {c} | {n} | {cell(rep_stat(rs, 50), n)} "
+                       f"| {cell(rep_stat(rs, 99), n)} | {cell(v, n)} | {d} | {verdict} |")
     return "\n".join(out)
 
 
@@ -171,31 +234,6 @@ def maxrate_table(runs: list[Run], loss_threshold_pct: float) -> str:
     return "\n".join(out)
 
 
-def tuning_table(runs: list[Run], baseline: str) -> str:
-    """Each config vs `baseline`, per (path, rate): delta of p50/p99/p99.9."""
-    lat = {(r.config, r.path, r.rate): r for r in runs if r.rtt_sched_us is not None}
-    configs = sorted({c for c, _, _ in lat})
-    if baseline not in configs or len(configs) < 2:
-        return ""
-    out = [f"| path | rate | config | p50 µs | p99 µs | p99.9 µs | Δp99.9 vs `{baseline}` |",
-           "|---|---:|---|---:|---:|---:|---:|"]
-    keys = sorted({(p, rt) for _, p, rt in lat}, key=lambda k: (path_key(k[0]), k[1]))
-    for p, rt in keys:
-        base = lat.get((baseline, p, rt))
-        if not base:
-            continue
-        b999 = pct(base.rtt_sched_us, 99.9)
-        for c in [baseline] + [c for c in configs if c != baseline]:
-            r = lat.get((c, p, rt))
-            if not r:
-                continue
-            v = pct(r.rtt_sched_us, 99.9)
-            d = "–" if c == baseline else f"{100 * (v - b999) / b999:+.0f}%"
-            out.append(f"| {p} | {rt:,} | {c} | {fmt(pct(r.rtt_sched_us, 50))} "
-                       f"| {fmt(pct(r.rtt_sched_us, 99))} | {fmt(v)} | {d} |")
-    return "\n".join(out)
-
-
 # ---------------------------------------------------------------------------
 # plots
 # ---------------------------------------------------------------------------
@@ -207,10 +245,14 @@ def plot_percentiles(runs: list[Run], plot_dir: Path) -> list[Path]:
     from matplotlib.ticker import FixedLocator, FuncFormatter
 
     made = []
-    groups: dict[tuple[str, int], list[Run]] = {}
+    # Repetitions of the same (config, path, rate) are pooled for the curve.
+    pooled: dict[tuple[str, int, str], list[np.ndarray]] = {}
     for r in runs:
         if r.rtt_sched_us is not None and len(r.rtt_sched_us):
-            groups.setdefault((r.config, r.rate), []).append(r)
+            pooled.setdefault((r.config, r.rate, r.path), []).append(r.rtt_sched_us)
+    groups: dict[tuple[str, int], list[Run]] = {}
+    for (c, rt, p), arrs in pooled.items():
+        groups.setdefault((c, rt), []).append(Run(c, p, rt, {}, {}, np.concatenate(arrs)))
     # x axis: percentile on a "nines" scale, -log10(1 - p)
     ps = np.array([0, 50, 75, 90, 95, 99, 99.5, 99.9, 99.95, 99.99])
     xs = -np.log10(1 - ps / 100)

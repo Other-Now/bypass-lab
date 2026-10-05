@@ -1,0 +1,2 @@
+TELEMETRY: No legacy callbacks, legacy socket not created
+READY dpdk port=0 driver=net_af_packet lcore=2 link=up nrx=1024 ntx=1024

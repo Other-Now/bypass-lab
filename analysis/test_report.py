@@ -68,7 +68,21 @@ def test_tuning_table_delta(tmp_path):
     write_run(tmp_path / "pinned", "afxdp", 1000, np.full(5000, 10_000, dtype=np.int64), 5000, 5000)
     write_run(tmp_path / "irq", "afxdp", 1000, np.full(5000, 8_000, dtype=np.int64), 5000, 5000)
     t = report.tuning_table(report.load_runs(tmp_path), "pinned")
-    assert "-20%" in t
+    assert "-20%" in t and "single run" in t
+
+
+def test_repetitions_verdict(tmp_path):
+    for rep, (b, c) in enumerate([(10_000, 8_000), (10_500, 8_200), (9_800, 7_900)], 1):
+        write_run(tmp_path / f"rep{rep}" / "pinned", "afxdp", 1000, np.full(5000, b, dtype=np.int64), 5000, 5000)
+        write_run(tmp_path / f"rep{rep}" / "irq", "afxdp", 1000, np.full(5000, c, dtype=np.int64), 5000, 5000)
+        write_run(tmp_path / f"rep{rep}" / "noisy", "afxdp", 1000,
+                  np.full(5000, [7_000, 12_000, 10_000][rep - 1], dtype=np.int64), 5000, 5000)
+    runs = report.load_runs(tmp_path)
+    assert {r.rep for r in runs} == {"1", "2", "3"}
+    t = report.tuning_table(runs, "pinned")
+    assert "better (ranges disjoint)" in t
+    assert "within noise" in t
+    assert "(9.8\u201310.5)" in report.latency_table(runs)
 
 
 def test_bad_magic_rejected(tmp_path):

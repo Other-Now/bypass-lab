@@ -19,7 +19,7 @@ export RX_PREPARE="bash $PWD/scripts/ci/rx_prepare.sh"
 export FEED=${FEED:-data/sample.NASDAQ_ITCH50}
 export XDP_MODE=${XDP_MODE:-native}
 RATES_LAT=${RATES_LAT:-"10000 100000"}
-SECS=${SECS:-10}
+SECS=${SECS:-8}
 ALL="recvmsg recvmmsg afxdp dpdk"
 EAL_COMMON="--no-pci --vdev=net_af_packet0,iface=veth-rx --file-prefix=bl --log-level=lib.eal:warning"
 
@@ -28,26 +28,32 @@ SND_TX=${HK##*[,-]}   # second thread of core 0
 SND_ECHO=${HK%%[,-]*} # first thread of core 0
 echo "layout: receiver $HOT (sibling $SIBLING idle), sender tx $SND_TX echo $SND_ECHO"
 
-rm -rf "$OUT_DIR"
+BASE_OUT=$OUT_DIR
+REPS=${REPS:-3}
+rm -rf "$BASE_OUT"
 run() { env "$@" bash scripts/run_matrix.sh; }
 
-# 1. unpinned: the scheduler decides. DPDK always pins its lcore, so let it float
-#    over all four CPUs instead.
-run LABEL=unpinned PATHS="$ALL" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS" \
-    DPDK_EAL="--lcores='0@(0-3)' $EAL_COMMON"  # quoted: bash -c re-parses it
+# Every latency config is repeated REPS times, reps outermost, so slow drift on
+# the shared CI host lands on every config rather than on whichever ran last.
+# analysis/report.py reports median and min-max across reps, and only calls a
+# tuning step real when the ranges do not overlap.
+for rep in $(seq 1 "$REPS"); do
+  export OUT_DIR=$BASE_OUT/rep$rep
 
-# 2. pinned: every path on $HOT, sender on core 0. The reference for the rest.
-run LABEL=pinned PATHS="$ALL" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS" \
-    RX_CORE=$HOT TX_CORE=$SND_TX ECHO_CORE=$SND_ECHO DPDK_EAL="-l $HOT $EAL_COMMON"
+  # 1. unpinned: the scheduler decides. DPDK always pins its lcore, so let it
+  #    float over all four CPUs instead (quoted: bash -c re-parses it).
+  run LABEL=unpinned PATHS="$ALL" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS"       DPDK_EAL="--lcores='0@(0-3)' $EAL_COMMON"
 
-# 3. huge-page step, one path at a time against `pinned`:
-#    AF_XDP UMEM 4K -> 2M pages; DPDK mempool 2M pages -> --no-huge (4K).
-run LABEL=pinned+umem2M PATHS="afxdp" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS" \
-    RX_CORE=$HOT TX_CORE=$SND_TX ECHO_CORE=$SND_ECHO XDP_EXTRA="--umem-huge"
-run LABEL=pinned+dpdk-nohuge PATHS="dpdk" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS" \
-    RX_CORE=$HOT TX_CORE=$SND_TX ECHO_CORE=$SND_ECHO DPDK_EAL="-l $HOT --no-huge -m 512 $EAL_COMMON"
+  # 2. pinned: every path on $HOT, sender on core 0. The reference for the rest.
+  run LABEL=pinned PATHS="$ALL" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS"       RX_CORE="$HOT" TX_CORE="$SND_TX" ECHO_CORE="$SND_ECHO" DPDK_EAL="-l $HOT $EAL_COMMON"
 
-# 4. throughput: no echoes, rising rate, two sender threads on core 0's two
-#    hyperthreads (tx threads take TX_CORE, TX_CORE+1).
-run LABEL=maxrate MODE=maxrate PATHS="$ALL" RATES="${RATES_MAX:-250000 500000 1000000 1500000 2000000}" \
-    SECONDS_PER_RUN=5 TX_THREADS=2 RX_CORE=$HOT TX_CORE=$SND_ECHO DPDK_EAL="-l $HOT $EAL_COMMON"
+  # 3. huge-page step, one path at a time against `pinned`:
+  #    AF_XDP UMEM 4K -> 2M pages; DPDK mempool 2M pages -> --no-huge (4K).
+  run LABEL=pinned+umem2M PATHS="afxdp" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS"       RX_CORE="$HOT" TX_CORE="$SND_TX" ECHO_CORE="$SND_ECHO" XDP_EXTRA="--umem-huge"
+  run LABEL=pinned+dpdk-nohuge PATHS="dpdk" RATES="$RATES_LAT" SECONDS_PER_RUN="$SECS"       RX_CORE="$HOT" TX_CORE="$SND_TX" ECHO_CORE="$SND_ECHO" DPDK_EAL="-l $HOT --no-huge -m 512 $EAL_COMMON"
+done
+
+# 4. throughput, once: no echoes, rising rate, two sender threads on core 0's
+#    two hyperthreads. On veth this measures the sender (see README).
+export OUT_DIR=$BASE_OUT/rep1
+run LABEL=maxrate MODE=maxrate PATHS="$ALL" RATES="${RATES_MAX:-250000 500000 1000000}"     SECONDS_PER_RUN=5 TX_THREADS=2 RX_CORE="$HOT" TX_CORE="$SND_ECHO" DPDK_EAL="-l $HOT $EAL_COMMON"
