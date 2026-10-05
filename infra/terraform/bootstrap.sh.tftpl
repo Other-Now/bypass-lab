@@ -1,0 +1,75 @@
+#!/bin/bash
+# cloud-init user data (rendered by Terraform). Runs once, as root, at first boot.
+# Note: this file is a Terraform template -- a dollar-brace sequence is a
+# Terraform interpolation, so the shell code below only uses plain $VAR.
+set -euxo pipefail
+exec > >(tee -a /var/log/bypass-lab-bootstrap.log) 2>&1
+
+# Safety net first: whatever else happens, this instance terminates itself.
+shutdown -h +${ttl_minutes} "bypass-lab TTL reached" || true
+
+cat >/etc/bypass-lab.env <<EOF
+BL_ROLE=${role}
+BL_DATA_IP=${data_ip}
+BL_PEER_DATA_IP=${peer_data_ip}
+BL_DATA_MAC=${data_mac}
+BL_PEER_MAC=${peer_mac}
+BL_PEER_MGMT_IP=${peer_mgmt_ip}
+BL_REPO=/opt/bypass-lab
+EOF
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q
+apt-get install -y -q build-essential cmake ninja-build pkg-config clang git \
+  libxdp-dev libbpf-dev dpdk dpdk-dev libdpdk-dev \
+  python3-numpy python3-matplotlib ethtool iptables jq "linux-modules-extra-$(uname -r)" || \
+apt-get install -y -q build-essential cmake ninja-build pkg-config clang git \
+  libxdp-dev libbpf-dev dpdk dpdk-dev libdpdk-dev python3-numpy python3-matplotlib ethtool iptables jq
+
+# Peer SSH: the sender drives the receiver over the management network.
+install -d -m 700 -o ubuntu -g ubuntu /home/ubuntu/.ssh
+echo "${peer_pubkey}" >>/home/ubuntu/.ssh/authorized_keys
+if [ "${role}" = "sender" ]; then
+  cat >/home/ubuntu/.ssh/id_peer <<'KEY'
+${peer_privkey}
+KEY
+  chmod 600 /home/ubuntu/.ssh/id_peer
+  cat >/home/ubuntu/.ssh/config <<EOF
+Host rx
+  HostName ${peer_mgmt_ip}
+  User ubuntu
+  IdentityFile ~/.ssh/id_peer
+  StrictHostKeyChecking accept-new
+EOF
+fi
+chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+
+# Huge pages, persistent across the isolcpus reboot.
+echo "vm.nr_hugepages=${hugepages}" >/etc/sysctl.d/90-bypass-lab.conf
+echo "net.core.rmem_max=33554432" >>/etc/sysctl.d/90-bypass-lab.conf
+echo "net.core.wmem_max=33554432" >>/etc/sysctl.d/90-bypass-lab.conf
+sysctl --system
+
+# Code.
+git clone --depth 1 --branch "${repo_ref}" "${repo_url}" /opt/bypass-lab
+cmake -S /opt/bypass-lab -B /opt/bypass-lab/build -G Ninja -DBL_WITH_XDP=ON -DBL_WITH_DPDK=ON
+cmake --build /opt/bypass-lab/build
+chown -R ubuntu:ubuntu /opt/bypass-lab
+
+# Data-plane NIC setup now and on every boot (the isolcpus step reboots).
+cat >/etc/systemd/system/bypass-lab-net.service <<'UNIT'
+[Unit]
+Description=bypass-lab data ENI setup
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/bypass-lab/scripts/aws/net_setup.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now bypass-lab-net.service
+
+touch /var/lib/bypass-lab-ready

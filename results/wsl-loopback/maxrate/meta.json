@@ -1,0 +1,5 @@
+{"label":"maxrate","mode":"maxrate","rx_mode":"local","paths":"recvmsg recvmmsg","rates":"200000 400000 600000 800000 1000000",
+ "seconds":5,"msgs_per_pkt":1,"rx_core":"3","tx_core":"1",
+ "echo_core":"","xdp_mode":"native","xdp_extra":"","dpdk_eal":"",
+ "rx_extra":"","feed":"data/sample.NASDAQ_ITCH50","date":"2026-10-05T10:25:57Z",
+ "sender":{"host": "MANPRIT01", "kernel": "6.18.33.2-microsoft-standard-WSL2", "cpu": "Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz", "nproc": 4, "cmdline": "initrd=\\initrd.img WSL_ROOT_INIT=1 panic=-1 nr_cpus=4 hv_utils.timesync_implicit=1 console=hvc0 debug pty.legacy_count=0 WSL_ENABLE_CRASH_DUMP=1", "irqbalance": "inactive", "isolated": "", "hugepages_2M": 0, "numa_nodes": 1, "product": ""},"receiver":{"host": "MANPRIT01", "kernel": "6.18.33.2-microsoft-standard-WSL2", "cpu": "Intel(R) Core(TM) i5-9300H CPU @ 2.40GHz", "nproc": 4, "cmdline": "initrd=\\initrd.img WSL_ROOT_INIT=1 panic=-1 nr_cpus=4 hv_utils.timesync_implicit=1 console=hvc0 debug pty.legacy_count=0 WSL_ENABLE_CRASH_DUMP=1", "irqbalance": "inactive", "isolated": "", "hugepages_2M": 0, "numa_nodes": 1, "product": ""}}

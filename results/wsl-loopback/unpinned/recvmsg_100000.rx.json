@@ -1,0 +1,1 @@
+{"path":"recvmsg","packets":997164,"messages":997164,"decoded":997164,"checksum":"dd782fc6c3fa7e20","unknown":0,"bad_length":0,"malformed":0,"gaps":2836,"late":0,"echoes":997164,"first_seq":0,"last_seq":999999,"sender_sent":1000000,"lost":2836,"rx_seconds":9.999923,"rx_pps":99717.1,"batches":997165,"empty_polls":0,"core":-1,"blocking":true}

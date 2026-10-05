@@ -1,0 +1,1 @@
+{"label":"maxrate/recvmsg_200000","rate":200000.0,"count":1000000,"sent":1000000,"tx_errors":0,"achieved_pps":199999.5,"msgs_per_pkt":1,"echo_every":0,"echoes_expected":0,"echoes_received":0,"echo_bad":0,"expected_checksum":"43b2b940da691fb8","lag_max_ns":6339226,"late_1us":297761,"late_10us":91817,"late_100us":483,"tx_threads":1,"t0_ns":328366151240,"warmup_ns":500000000}

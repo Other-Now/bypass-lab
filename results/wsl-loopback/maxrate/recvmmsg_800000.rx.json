@@ -1,0 +1,1 @@
+{"path":"recvmmsg","packets":4000000,"messages":4000000,"decoded":4000000,"checksum":"2f5f29214c29733d","unknown":0,"bad_length":0,"malformed":0,"gaps":0,"late":0,"echoes":0,"first_seq":0,"last_seq":3999999,"sender_sent":4000000,"lost":0,"rx_seconds":8.504116,"rx_pps":470360.4,"batches":3918951,"empty_polls":3252111,"core":3,"busy_poll_us":50}

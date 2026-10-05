@@ -1,0 +1,10 @@
+build*/
+__pycache__/
+.pytest_cache/
+*.pyc
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/*.tfstate*
+infra/terraform/operator.auto.tfvars
+data/*.NASDAQ_ITCH50
+!data/sample.NASDAQ_ITCH50

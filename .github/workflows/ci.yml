@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: build + unit tests (${{ matrix.cxx }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { cc: gcc, cxx: g++ }
+          - { cc: clang, cxx: clang++ }
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build pkg-config clang libxdp-dev libbpf-dev dpdk-dev libdpdk-dev python3-numpy python3-pytest python3-matplotlib
+      - name: configure (all four paths required)
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} -DBL_WITH_XDP=ON -DBL_WITH_DPDK=ON
+      - name: build
+        run: cmake --build build
+      - name: unit + compile-fail tests
+        run: ctest --test-dir build --output-on-failure
+      - name: decoder bench (generated vs hand-written)
+        run: |
+          taskset -c 1 ./build/bl_decoder_bench data/sample.NASDAQ_ITCH50 0 21 | tee decoder_${{ matrix.cxx }}.txt
+          bash scripts/dispatch_asm.sh build/bl_decoder_bench | tee -a decoder_${{ matrix.cxx }}.txt
+      - name: analysis tests
+        run: python3 -m pytest -q analysis
+      - name: ASan/UBSan unit tests
+        if: matrix.cc == 'gcc'
+        run: |
+          cmake -S . -B build-asan -G Ninja -DBL_SANITIZE=ON -DBL_WITH_XDP=OFF -DBL_WITH_DPDK=OFF -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-asan --target bl_tests
+          ./build-asan/bl_tests data/sample.NASDAQ_ITCH50
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decoder-bench-${{ matrix.cc }}
+          path: decoder_*.txt
+
+  terraform:
+    name: terraform fmt + validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=infra/terraform fmt -check -recursive
+      - run: terraform -chdir=infra/terraform init -backend=false
+      - run: terraform -chdir=infra/terraform validate
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh scripts/ci/*.sh scripts/tune/*.sh scripts/aws/*.sh
+
+  e2e-veth:
+    name: e2e, all four paths over veth
+    runs-on: ubuntu-24.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build pkg-config clang libxdp-dev libbpf-dev dpdk-dev libdpdk-dev python3-numpy python3-matplotlib ethtool iptables
+      - name: build
+        run: |
+          cmake -S . -B build -G Ninja -DBL_WITH_XDP=ON -DBL_WITH_DPDK=ON
+          cmake --build build
+      - name: host setup (veth + netns, huge pages)
+        run: |
+          sudo sysctl -w vm.nr_hugepages=512
+          sudo sysctl -w net.core.rmem_max=33554432 net.core.wmem_max=33554432
+          grep -E "HugePages_(Total|Free)" /proc/meminfo
+          lscpu | grep -E "Model name|^CPU\(s\)|Thread|NUMA node\(s\)"
+          sudo bash scripts/ci/veth_setup.sh
+      - name: run matrix
+        run: bash scripts/ci/run_ci_matrix.sh 2>&1 | grep -v "^feed:"
+      - name: report
+        if: always()
+        run: |
+          python3 analysis/report.py results/ci-veth --out results/ci-veth/REPORT.md --plots results/ci-veth/plots \
+            --title "CI veth pair (GitHub ubuntu-24.04 runner) — functional e2e, not NIC numbers" --baseline pinned
+          cat results/ci-veth/REPORT.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-veth-results
+          path: results/ci-veth
