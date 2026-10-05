@@ -52,6 +52,7 @@ int run_dpdk(const Config& c, FeedHandler& h, std::string& extra) {
         port = static_cast<std::uint16_t>(c.dpdk_port);
     } else {
         bool found = false;
+        std::uint16_t p = 0;
         RTE_ETH_FOREACH_DEV(p) {
             port = p;
             found = true;

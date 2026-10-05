@@ -64,8 +64,9 @@ message(STATUS "bypass-lab: AF_XDP=${BL_HAVE_XDP} DPDK=${BL_HAVE_DPDK}")
 # --- BPF object ------------------------------------------------------------
 set(BL_BPF_OBJ ${CMAKE_BINARY_DIR}/xdp_udp_redirect.bpf.o)
 if(BL_HAVE_XDP)
-  execute_process(COMMAND ${CMAKE_C_COMPILER} -print-multiarch
-                  OUTPUT_VARIABLE BL_MULTIARCH OUTPUT_STRIP_TRAILING_WHITESPACE)
+  # Debian/Ubuntu keep asm/types.h under /usr/include/<arch>-linux-gnu.
+  # (clang -print-multiarch prints nothing on some versions, so don't ask it.)
+  set(BL_MULTIARCH ${CMAKE_SYSTEM_PROCESSOR}-linux-gnu)
   add_custom_command(
     OUTPUT ${BL_BPF_OBJ}
     COMMAND ${BL_CLANG} -O2 -g -target bpf -Wall
