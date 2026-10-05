@@ -1,0 +1,1 @@
+{"label":"maxrate/afxdp_1000000","rate":1000000.0,"count":5000000,"sent":5000000,"tx_errors":0,"achieved_pps":425220.1,"msgs_per_pkt":1,"echo_every":0,"echoes_expected":0,"echoes_received":0,"echo_bad":0,"expected_checksum":"44e86d6e1fcdb805","lag_max_ns":6758675675,"late_1us":156251,"late_10us":156251,"late_100us":156247,"tx_threads":2,"t0_ns":684165440955,"warmup_ns":500000000}

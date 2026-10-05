@@ -1,0 +1,1 @@
+{"label":"pinned/recvmsg_100000","rate":100000.0,"count":800000,"sent":800000,"tx_errors":0,"achieved_pps":100000.0,"msgs_per_pkt":1,"echo_every":1,"echoes_expected":800000,"echoes_received":800000,"echo_bad":0,"expected_checksum":"a69330cde9da6162","lag_max_ns":600903,"late_1us":21702,"late_10us":8050,"late_100us":6,"tx_threads":1,"t0_ns":179785775091,"warmup_ns":500000000}

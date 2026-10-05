@@ -1,0 +1,1 @@
+{"label":"pinned/afxdp_10000","rate":10000.0,"count":80000,"sent":80000,"tx_errors":0,"achieved_pps":10000.0,"msgs_per_pkt":1,"echo_every":1,"echoes_expected":80000,"echoes_received":80000,"echo_bad":0,"expected_checksum":"c28b5c1a75ddb91d","lag_max_ns":216681,"late_1us":70,"late_10us":17,"late_100us":1,"tx_threads":1,"t0_ns":205393957394,"warmup_ns":500000000}
