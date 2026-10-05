@@ -8,3 +8,4 @@ infra/terraform/*.tfstate*
 infra/terraform/operator.auto.tfvars
 data/*.NASDAQ_ITCH50
 !data/sample.NASDAQ_ITCH50
+*.samples.bin
